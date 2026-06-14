@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>妮努猫视频 - 配置</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 24px;
+            background: #121212;
+            color: #fff;
+        }
+
+        h1 {
+            font-size: 22px;
+            margin-bottom: 8px;
+        }
+
+        p {
+            color: #aaa;
+            font-size: 14px;
+        }
+
+        label {
+            display: block;
+            margin-top: 16px;
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            background: #1e1e1e;
+            color: #fff;
+            font-size: 16px;
+        }
+
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        button {
+            margin-top: 24px;
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background: #e53935;
+            color: #fff;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        #message {
+            margin-top: 16px;
+            font-size: 14px;
+        }
+
+        .ok {
+            color: #66bb6a;
+        }
+
+        .err {
+            color: #ef5350;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>妮努猫视频配置</h1>
+    <p>请确保手机与电视在同一 WiFi 下。</p>
+
+    <label for="pin">访问 PIN</label>
+    <input id="pin" type="text" maxlength="6" placeholder="6 位 PIN" />
+
+    <label for="uid">博主 UID</label>
+    <input id="uid" type="text" inputmode="numeric" placeholder="weibo.com/u/ 后面的数字" />
+
+    <label for="cookie">Cookie（可选，播放失败时填写）</label>
+    <textarea id="cookie" placeholder="从 m.weibo.cn 登录后复制 Cookie"></textarea>
+
+    <button onclick="saveConfig()">保存配置</button>
+    <div id="message"></div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const pinInput = document.getElementById('pin');
+        const uidInput = document.getElementById('uid');
+        const cookieInput = document.getElementById('cookie');
+        const messageEl = document.getElementById('message');
+
+        if (params.get('pin')) {
+            pinInput.value = params.get('pin');
+        }
+
+        async function loadConfig() {
+            const pin = pinInput.value.trim();
+            if (!pin) return;
+            try {
+                const res = await fetch('/api/config?pin=' + encodeURIComponent(pin));
+                if (!res.ok) return;
+                const data = await res.json();
+                uidInput.value = data.uid || '';
+                cookieInput.value = data.cookie || '';
+            } catch (e) {
+                // ignore preload errors
+            }
+        }
+
+        async function saveConfig() {
+            const pin = pinInput.value.trim();
+            const uid = uidInput.value.trim();
+            const cookie = cookieInput.value.trim();
+            if (!pin) {
+                showMessage('请输入 PIN', false);
+                return;
+            }
+            if (!uid) {
+                showMessage('请输入博主 UID', false);
+                return;
+            }
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        pin,
+                        uid,
+                        cookie
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.ok) {
+                    showMessage('保存成功，返回电视刷新列表', true);
+                } else {
+                    showMessage(data.message || '保存失败', false);
+                }
+            } catch (e) {
+                showMessage('网络错误：' + e.message, false);
+            }
+        }
+
+        function showMessage(text, ok) {
+            messageEl.textContent = text;
+            messageEl.className = ok ? 'ok' : 'err';
+        }
+
+        pinInput.addEventListener('change', loadConfig);
+        loadConfig();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Local machine config
+local.properties
+
+# IDE
+.idea/
+*.iml
+.kotlin/
+
+# Built artifacts
+*.apk
+*.aab
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor workspace (optional local file)
+*.code-workspace
+
+# Keystore (if added later)
+*.jks
+*.keystore
