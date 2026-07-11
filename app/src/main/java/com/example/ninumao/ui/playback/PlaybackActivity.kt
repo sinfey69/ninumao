@@ -8,10 +8,16 @@ import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.leanback.widget.ArrayObjectAdapter
+import androidx.leanback.widget.BaseGridView
+import androidx.leanback.widget.ItemBridgeAdapter
+import androidx.leanback.widget.OnChildViewHolderSelectedListener
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.RecyclerView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -40,6 +46,11 @@ class PlaybackActivity : AppCompatActivity() {
     private var isPrefetching: Boolean = false
     private var pendingAdvanceAfterPrefetch: Boolean = false
     private var lastBackPressAt: Long = 0L
+    private var isPlaylistOverlayVisible: Boolean = false
+    private var playlistFocusIndex: Int = 0
+    private var lastPlaylistConfirmAt: Long = 0L
+
+    private lateinit var playlistAdapter: ArrayObjectAdapter
 
     private val progressHandler = Handler(Looper.getMainLooper())
     private val progressRunnable = object : Runnable {
@@ -75,6 +86,9 @@ class PlaybackActivity : AppCompatActivity() {
 
         setupBackHandler()
         setupTitleOverlay()
+        setupPlaylistOverlay()
+        syncPlaylistAdapter()
+        binding.playlistOverlay.post { scrollPlaylistToIndex(currentIndex) }
         initializePlayer()
     }
 
@@ -103,6 +117,46 @@ class PlaybackActivity : AppCompatActivity() {
             },
         )
         updateTitleOverlay()
+    }
+
+    // setupPlaylistOverlay 初始化底部横向视频列表，供暂停或下键时选片。
+    private fun setupPlaylistOverlay() {
+        playlistAdapter = ArrayObjectAdapter(PlaybackVideoCardPresenter())
+        val bridgeAdapter = ItemBridgeAdapter(playlistAdapter)
+        bridgeAdapter.setAdapterListener(object : ItemBridgeAdapter.AdapterListener() {
+            override fun onBind(viewHolder: ItemBridgeAdapter.ViewHolder) {
+                viewHolder.itemView.setOnClickListener {
+                    val position = viewHolder.adapterPosition
+                    if (position != RecyclerView.NO_POSITION) {
+                        selectVideoAt(position)
+                    }
+                }
+            }
+        })
+        binding.playlistGrid.apply {
+            adapter = bridgeAdapter
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setRowHeight(resources.getDimensionPixelSize(R.dimen.video_card_height))
+            setHorizontalSpacing(resources.getDimensionPixelSize(R.dimen.playlist_item_spacing))
+            setWindowAlignment(BaseGridView.WINDOW_ALIGN_NO_EDGE)
+            setWindowAlignmentOffsetPercent(25f)
+            setOnChildViewHolderSelectedListener(object : OnChildViewHolderSelectedListener() {
+                override fun onChildViewHolderSelected(
+                    parent: RecyclerView?,
+                    child: RecyclerView.ViewHolder?,
+                    position: Int,
+                    subposition: Int,
+                ) {
+                    if (position != RecyclerView.NO_POSITION) {
+                        playlistFocusIndex = position
+                    }
+                    if (position >= playlist.size - PREFETCH_TRIGGER_REMAINING) {
+                        maybePrefetchMore(force = false)
+                    }
+                }
+            })
+        }
     }
 
     // initializePlayer 创建带 Referer/Cookie 的播放器，并注册连播监听。
@@ -157,23 +211,31 @@ class PlaybackActivity : AppCompatActivity() {
             if (event.action == KeyEvent.ACTION_UP) handleBackPress()
             return true
         }
+        if (isPlaylistOverlayVisible) {
+            if (isPlaylistConfirmKey(code)) {
+                if (event.action == KeyEvent.ACTION_UP) {
+                    confirmPlaylistSelection()
+                }
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                return dispatchKeyEventForPlaylistOverlay(event)
+            }
+            if (isPlaylistOverlayKey(code)) return true
+            return super.dispatchKeyEvent(event)
+        }
+        if (isPlaylistConfirmKey(code)) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                handlePlaybackConfirmKey(code)
+            }
+            return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (code) {
                 KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_PAGE_DOWN -> { playNext(); return true }
                 KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_PAGE_UP -> { playPrev(); return true }
-                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-                KeyEvent.KEYCODE_DPAD_CENTER,
-                KeyEvent.KEYCODE_ENTER,
-                KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                    togglePlayPause()
-                    return true
-                }
-                KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                    setPlaying(true)
-                    return true
-                }
-                KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                    setPlaying(false)
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    showPlaylistOverlay()
                     return true
                 }
                 KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
@@ -191,9 +253,97 @@ class PlaybackActivity : AppCompatActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    // dispatchKeyEventForPlaylistOverlay 在底部列表可见时处理选片相关按键。
+    private fun dispatchKeyEventForPlaylistOverlay(event: KeyEvent): Boolean {
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                movePlaylistSelection(-1)
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                movePlaylistSelection(1)
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                hidePlaylistOverlay()
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN -> true
+            else -> isPlaylistOverlayKey(event.keyCode)
+        }
+    }
+
+    // isPlaylistConfirmKey 判断是否为确认选片的按键。
+    private fun isPlaylistConfirmKey(keyCode: Int): Boolean {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_SPACE,
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> true
+            else -> false
+        }
+    }
+
+    // handlePlaybackConfirmKey 在列表未显示时响应确认键，仅于 ACTION_UP 触发。
+    private fun handlePlaybackConfirmKey(keyCode: Int) {
+        when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY -> setPlaying(true)
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> setPlaying(false)
+            else -> togglePlayPause()
+        }
+    }
+
+    // confirmPlaylistSelection 确认当前焦点项并播放。
+    private fun confirmPlaylistSelection() {
+        val now = System.currentTimeMillis()
+        if (now - lastPlaylistConfirmAt < PLAYLIST_CONFIRM_DEBOUNCE_MS) return
+        lastPlaylistConfirmAt = now
+        val gridIndex = binding.playlistGrid.selectedPosition
+        val index = if (gridIndex in playlist.indices) gridIndex else playlistFocusIndex
+        selectVideoAt(index)
+    }
+
+    // isPlaylistOverlayKey 判断按键是否应由底部列表层消费，避免传递给 PlayerView。
+    private fun isPlaylistOverlayKey(keyCode: Int): Boolean {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_REWIND,
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> true
+            else -> false
+        }
+    }
+
+    // movePlaylistSelection 在底部列表中按步长移动选中项。
+    private fun movePlaylistSelection(delta: Int) {
+        if (playlist.isEmpty()) return
+        val next = (playlistFocusIndex + delta).coerceIn(0, playlist.size - 1)
+        if (next == playlistFocusIndex) return
+        playlistFocusIndex = next
+        binding.playlistGrid.setSelectedPositionSmooth(playlistFocusIndex)
+    }
+
     // handleBackPress 单击返回仅显示遮罩，短时间内连续按两次才退出。
     private fun handleBackPress() {
         val now = System.currentTimeMillis()
+        if (isPlaylistOverlayVisible) {
+            hidePlaylistOverlay()
+            lastBackPressAt = now
+            return
+        }
         val controllerVisible = binding.playerView.isControllerFullyVisible
         if (!controllerVisible) {
             binding.playerView.showController()
@@ -208,16 +358,111 @@ class PlaybackActivity : AppCompatActivity() {
         }
     }
 
-    // togglePlayPause 切换暂停与继续播放。
+    // togglePlayPause 切换暂停与继续播放；暂停时弹出底部视频列表。
     private fun togglePlayPause() {
         val exo = player ?: return
-        exo.playWhenReady = !exo.isPlaying
+        if (exo.isPlaying) {
+            exo.playWhenReady = false
+            showPlaylistOverlay()
+        } else {
+            exo.playWhenReady = true
+            hidePlaylistOverlay()
+        }
     }
 
-    // setPlaying 设置播放状态。
+    // setPlaying 设置播放状态；暂停时同步显示底部视频列表。
     private fun setPlaying(playing: Boolean) {
         val exo = player ?: return
         exo.playWhenReady = playing
+        if (playing) {
+            hidePlaylistOverlay()
+        } else {
+            showPlaylistOverlay()
+        }
+    }
+
+    // showPlaylistOverlay 暂停并展示底部横向视频列表，定位到当前播放项。
+    private fun showPlaylistOverlay() {
+        player?.playWhenReady = false
+        binding.playerView.isFocusable = false
+        binding.playerView.isFocusableInTouchMode = false
+        syncPlaylistAdapter()
+        binding.playlistOverlay.visibility = View.VISIBLE
+        binding.playlistGrid.isFocusable = true
+        binding.playlistGrid.isFocusableInTouchMode = true
+        isPlaylistOverlayVisible = true
+        scrollPlaylistToIndex(currentIndex)
+    }
+
+    // hidePlaylistOverlay 隐藏底部视频列表。
+    private fun hidePlaylistOverlay() {
+        binding.playlistOverlay.visibility = View.INVISIBLE
+        binding.playlistGrid.isFocusable = false
+        binding.playlistGrid.isFocusableInTouchMode = false
+        isPlaylistOverlayVisible = false
+        binding.playerView.isFocusable = true
+        binding.playerView.isFocusableInTouchMode = true
+    }
+
+    // syncPlaylistAdapter 将当前播放列表同步到底部列表适配器。
+    private fun syncPlaylistAdapter() {
+        val adapterSize = playlistAdapter.size()
+        if (adapterSize == playlist.size) return
+        if (adapterSize < playlist.size) {
+            for (index in adapterSize until playlist.size) {
+                playlistAdapter.add(playlist[index])
+            }
+            return
+        }
+        playlistAdapter.clear()
+        playlistAdapter.addAll(0, playlist)
+    }
+
+    // restorePlaylistSelection 在列表数据变更后恢复选中位置。
+    private fun restorePlaylistSelection() {
+        if (!isPlaylistOverlayVisible || playlist.isEmpty()) return
+        scrollPlaylistToIndex(playlistFocusIndex.coerceIn(0, playlist.size - 1))
+    }
+
+    // scrollPlaylistToIndex 等列表布局完成后再滚动并选中指定索引。
+    private fun scrollPlaylistToIndex(index: Int) {
+        val targetIndex = index.coerceIn(0, (playlist.size - 1).coerceAtLeast(0))
+        if (playlist.isEmpty()) return
+        playlistFocusIndex = targetIndex
+        val grid = binding.playlistGrid
+        val applySelection = Runnable {
+            grid.setSelectedPosition(playlistFocusIndex)
+            grid.post {
+                grid.setSelectedPosition(playlistFocusIndex)
+                grid.requestFocus()
+            }
+        }
+        if (grid.width > 0) {
+            grid.post(applySelection)
+            return
+        }
+        grid.viewTreeObserver.addOnGlobalLayoutListener(
+            object : ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    if (grid.width <= 0) return
+                    grid.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                    applySelection.run()
+                }
+            },
+        )
+        grid.requestLayout()
+    }
+
+    // selectVideoAt 切换到指定索引的视频并开始播放。
+    private fun selectVideoAt(index: Int) {
+        if (index !in playlist.indices) return
+        hidePlaylistOverlay()
+        if (index == currentIndex) {
+            player?.playWhenReady = true
+            return
+        }
+        currentIndex = index
+        player?.let { loadVideo(it, currentIndex) }
     }
 
     // seekBy 以秒级步长快进或快退。
@@ -288,6 +533,10 @@ class PlaybackActivity : AppCompatActivity() {
                 DebugLogger.log("Playback", "预取失败: ${e.message}")
             } finally {
                 isPrefetching = false
+                if (isPlaylistOverlayVisible) {
+                    syncPlaylistAdapter()
+                    restorePlaylistSelection()
+                }
                 if (pendingAdvanceAfterPrefetch) {
                     pendingAdvanceAfterPrefetch = false
                     val next = currentIndex + 1
@@ -368,6 +617,7 @@ class PlaybackActivity : AppCompatActivity() {
         private const val SEEK_STEP_MS = 10_000L
         private const val PREFETCH_TRIGGER_REMAINING = 3
         private const val DOUBLE_BACK_EXIT_WINDOW_MS = 1500L
+        private const val PLAYLIST_CONFIRM_DEBOUNCE_MS = 300L
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
 

@@ -43,6 +43,40 @@
 
     </LinearLayout>
 
+    <!-- 底部视频列表：暂停或按向下键时显示，左右选择视频 -->
+    <LinearLayout
+        android:id="@+id/playlist_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="#E6000000"
+        android:orientation="vertical"
+        android:paddingTop="12dp"
+        android:paddingBottom="20dp"
+        android:visibility="invisible">
+
+        <TextView
+            android:id="@+id/playlist_hint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="24dp"
+            android:layout_marginBottom="8dp"
+            android:text="@string/playback_playlist_hint"
+            android:textColor="#AAFFFFFF"
+            android:textSize="13sp" />
+
+        <androidx.leanback.widget.HorizontalGridView
+            android:id="@+id/playlist_grid"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/video_card_height"
+            android:clipToPadding="false"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp" />
+
+    </LinearLayout>
+
     <TextView
         android:id="@+id/error_text"
         android:layout_width="wrap_content"

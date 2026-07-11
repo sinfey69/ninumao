@@ -20,6 +20,7 @@
     <string name="error_load">加载失败：%1$s</string>
     <string name="error_no_uid">请先在设置中配置博主 UID</string>
     <string name="error_playback">播放失败</string>
+    <string name="playback_playlist_hint">左右选择视频 · 确认播放 · 上键关闭</string>
     <string name="onboard_hint">还没有配置博主 UID，先去设置一下吧</string>
     <string name="onboard_action">打开设置</string>
     <string name="onboard_key_hint">按遥控器 Menu 键 / 键盘 M 也可进入设置</string>
