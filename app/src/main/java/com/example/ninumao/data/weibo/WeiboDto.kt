@@ -13,9 +13,18 @@ data class ContainerIndexResponse(
 @JsonClass(generateAdapter = true)
 // ContainerData 包含 tabs 与 cards 列表数据。
 data class ContainerData(
+    @Json(name = "userInfo") val userInfo: UserInfo? = null,
     @Json(name = "tabsInfo") val tabsInfo: TabsInfo? = null,
     @Json(name = "cardlistInfo") val cardListInfo: CardListInfo? = null,
     val cards: List<Card>? = null,
+)
+
+@JsonClass(generateAdapter = true)
+// UserInfo 表示博主基本资料。
+data class UserInfo(
+    val id: Long? = null,
+    @Json(name = "screen_name") val screenName: String? = null,
+    val name: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-// DebugLogger 仅在 Debug 构建时收集日志，Release 版不输出接口请求信息。
+// DebugLogger 收集调试日志；默认关闭，需在设置页手动开启。
 object DebugLogger {
 
     private const val TAG = "NinumaoDebug"
@@ -15,12 +15,18 @@ object DebugLogger {
     private val _logFlow = MutableStateFlow("")
     val logFlow: StateFlow<String> = _logFlow.asStateFlow()
 
-    // isEnabled 当前构建是否启用调试日志。
-    val isEnabled: Boolean get() = BuildConfig.DEBUG
+    // collectionEnabled 用户是否开启日志采集（默认关闭）。
+    @Volatile
+    var collectionEnabled: Boolean = false
+        private set
 
-    // log 记录一行日志到 Logcat 和内存缓冲（Release 版为空操作）。
+    // isEnabled 当前是否应采集日志（需 Debug 构建且用户已开启）。
+    val isEnabled: Boolean
+        get() = BuildConfig.DEBUG && collectionEnabled
+
+    // log 记录一行日志到 Logcat 和内存缓冲。
     fun log(tag: String, msg: String) {
-        if (!BuildConfig.DEBUG) return
+        if (!isEnabled) return
         Log.d(TAG, "[$tag] $msg")
         val current = _logFlow.value
         val lines = current.lines().takeLast(MAX_LINES - 1).toMutableList()
@@ -30,7 +36,14 @@ object DebugLogger {
 
     // clear 清空日志缓冲。
     fun clear() {
-        if (!BuildConfig.DEBUG) return
         _logFlow.value = ""
+    }
+
+    // setEnabled 开关日志采集；关闭时同步清空缓冲。
+    fun setEnabled(enabled: Boolean) {
+        collectionEnabled = enabled && BuildConfig.DEBUG
+        if (!collectionEnabled) {
+            clear()
+        }
     }
 }

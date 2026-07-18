@@ -1,24 +1,25 @@
 package com.example.ninumao.ui.browse
 
-import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.leanback.app.VerticalGridSupportFragment
 import androidx.leanback.widget.ArrayObjectAdapter
 import androidx.leanback.widget.FocusHighlight
+import androidx.leanback.widget.SearchOrbView
 import androidx.leanback.widget.VerticalGridPresenter
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.ninumao.NinumaoApp
-import com.example.ninumao.playback.PlaybackSession
 import com.example.ninumao.R
 import com.example.ninumao.model.VideoItem
+import com.example.ninumao.playback.PlaybackSession
 import com.example.ninumao.ui.playback.PlaybackActivity
-import com.example.ninumao.ui.settings.SettingsActivity
 import kotlinx.coroutines.launch
 
 // VideoGridFragment 以多列网格形式展示视频列表，支持 D-pad 导航。
@@ -48,8 +49,9 @@ class VideoGridFragment : VerticalGridSupportFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val app = requireActivity().application as NinumaoApp
+        // 与 Activity 共用 ViewModel，避免设置页改 UID 后首页仍用旧实例数据
         viewModel = ViewModelProvider(
-            this,
+            requireActivity(),
             VideoViewModelFactory(app.configRepository, app.weiboRepository),
         )[VideoViewModel::class.java]
 
@@ -57,13 +59,55 @@ class VideoGridFragment : VerticalGridSupportFragment() {
         gridAdapter = ArrayObjectAdapter(VideoGridCardPresenter(0, 0))
         adapter = gridAdapter
         title = getString(R.string.browse_title)
+        setupTitleSettingsOrb()
 
         // 等根视图布局完成后，用实际宽度重建 presenter
-        view.post { rebuildPresenterWithActualWidth(view) }
+        view.post {
+            if (!isAdded) return@post
+            rebuildPresenterWithActualWidth(view)
+            styleTitleSettingsOrb(view)
+        }
 
         setupClickListeners()
         observeState()
         observeConfigUpdates()
+    }
+
+    // setupTitleSettingsOrb 启用标题区设置按钮（Leanback 焦点体系，可被遥控器选中）。
+    private fun setupTitleSettingsOrb() {
+        setOnSearchClickedListener {
+            (activity as? MainActivity)?.openSettings()
+        }
+    }
+
+    // styleTitleSettingsOrb 将标题区按钮改成设置齿轮样式。
+    private fun styleTitleSettingsOrb(root: View) {
+        if (!isAdded) return
+        val ctx = context ?: return
+        val orb = findSearchOrb(root) ?: return
+        val gear = ContextCompat.getDrawable(ctx, R.drawable.ic_settings_gear)
+        if (gear != null) {
+            orb.setOrbIcon(gear)
+        }
+        orb.contentDescription = getString(R.string.open_settings)
+        orb.setOrbColors(
+            SearchOrbView.Colors(
+                ContextCompat.getColor(ctx, R.color.primary),
+                ContextCompat.getColor(ctx, R.color.accent),
+                ContextCompat.getColor(ctx, android.R.color.white),
+            ),
+        )
+    }
+
+    // findSearchOrb 在标题区域查找 Leanback SearchOrbView。
+    private fun findSearchOrb(view: View): SearchOrbView? {
+        if (view is SearchOrbView) return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findSearchOrb(view.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
     }
 
     // rebuildPresenterWithActualWidth 用根视图真实宽度计算卡片尺寸，避免超出边界。
@@ -129,13 +173,26 @@ class VideoGridFragment : VerticalGridSupportFragment() {
         }
     }
 
-    // observeConfigUpdates 配置变更后刷新列表。
+    // observeConfigUpdates 配置变更后按需刷新（仅博主变化时）。
     private fun observeConfigUpdates() {
         val app = requireActivity().application as NinumaoApp
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                app.configUpdatedEvents.collect { viewModel.refresh() }
+                app.configUpdatedEvents.collect { refreshBrowseIfNeeded() }
             }
+        }
+    }
+
+    // refreshBrowseIfNeeded 仅在设置页改过配置、或博主 UID 变化、或列表为空时重载。
+    private suspend fun refreshBrowseIfNeeded() {
+        if (!isAdded) return
+        val app = requireActivity().application as NinumaoApp
+        val pending = app.consumePendingBrowseRefresh()
+        val configUid = app.configRepository.getConfig().uid
+        val state = viewModel.uiState.value
+        when {
+            pending || configUid != state.uid -> viewModel.refresh()
+            state.videos.isEmpty() && configUid.isNotBlank() -> viewModel.refresh()
         }
     }
 
@@ -155,18 +212,13 @@ class VideoGridFragment : VerticalGridSupportFragment() {
 
     override fun onResume() {
         super.onResume()
-        if (viewModel.uiState.value.videos.isEmpty()) {
-            viewModel.refresh()
+        // 从设置页返回且博主已变时重载；从播放页返回则保持列表与光标
+        viewLifecycleOwner.lifecycleScope.launch {
+            refreshBrowseIfNeeded()
         }
-    }
-
-    // openSettings 打开设置页。
-    private fun openSettings() {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.openSettings()
-        } else {
-            startActivity(Intent(requireContext(), SettingsActivity::class.java))
+        view?.post {
+            if (!isAdded) return@post
+            view?.let { styleTitleSettingsOrb(it) }
         }
     }
 

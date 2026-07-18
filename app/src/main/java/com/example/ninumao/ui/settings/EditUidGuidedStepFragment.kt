@@ -53,7 +53,9 @@ class EditUidGuidedStepFragment : GuidedStepSupportFragment() {
         }
         val app = requireActivity().application as NinumaoApp
         lifecycleScope.launch {
-            app.configRepository.updateUid(uid)
+            val config = app.configRepository.getConfig()
+            val name = app.weiboRepository.fetchBloggerName(config, uid)
+            app.configRepository.updateUid(uid, displayName = name.orEmpty())
             app.notifyConfigUpdated()
             Toast.makeText(requireContext(), R.string.settings_saved, Toast.LENGTH_SHORT).show()
             parentFragmentManager.popBackStack()

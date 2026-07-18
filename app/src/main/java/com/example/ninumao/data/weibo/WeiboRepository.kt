@@ -37,6 +37,7 @@ class WeiboRepository {
         if (cachedUid != uid) {
             cachedUid = uid
             cachedVideoContainerId = null
+            lastResolvedBloggerName = null
         }
 
         val containerId = cachedVideoContainerId ?: resolveVideoContainerId(api, uid).also {
@@ -68,6 +69,24 @@ class WeiboRepository {
         return VideoPageResult(videos = videos, nextSinceId = nextSinceId)
     }
 
+    // fetchBloggerName 根据 UID 拉取博主昵称，失败时返回 null。
+    suspend fun fetchBloggerName(config: AppConfig, uid: String): String? {
+        val trimmed = uid.trim()
+        if (trimmed.isBlank()) return null
+        return try {
+            val api = createApi(config, trimmed)
+            val initResponse = api.getContainerIndex(uid = trimmed)
+            val info = initResponse.data?.userInfo
+            val name = info?.screenName?.trim().orEmpty().ifBlank {
+                info?.name?.trim().orEmpty()
+            }
+            name.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            DebugLogger.log("Weibo", "拉取博主名称失败 uid=$trimmed: ${e.message}")
+            null
+        }
+    }
+
     // resolveVideoContainerId 从 init 响应解析视频 Tab 的 containerid。
     private suspend fun resolveVideoContainerId(api: WeiboApi, uid: String): String {
         DebugLogger.log("Weibo", "请求 init 接口 uid=$uid")
@@ -79,8 +98,17 @@ class WeiboRepository {
         }
         val containerId = videoTab?.containerid ?: "107603$uid"
         DebugLogger.log("Weibo", "选择 containerId=$containerId (tab=${videoTab?.tabKey ?: "fallback"})")
+        // 顺带缓存博主名到最近列表（由调用方在拿到名称后写入配置）
+        lastResolvedBloggerName = initResponse.data?.userInfo?.screenName?.trim()
+            ?.ifBlank { initResponse.data?.userInfo?.name?.trim() }
+            ?.takeIf { !it.isNullOrBlank() }
         return containerId
     }
+
+    // lastResolvedBloggerName 最近一次 init 解析到的博主昵称。
+    @Volatile
+    var lastResolvedBloggerName: String? = null
+        private set
 
     // extractVideos 从 cards 递归提取视频条目。
     private fun extractVideos(cards: List<Card>): List<VideoItem> {
@@ -144,7 +172,9 @@ class WeiboRepository {
         if (BuildConfig.DEBUG) {
             clientBuilder.addInterceptor(
                 HttpLoggingInterceptor { msg ->
-                    DebugLogger.log("HTTP", msg)
+                    if (DebugLogger.isEnabled) {
+                        DebugLogger.log("HTTP", msg)
+                    }
                 }.apply {
                     level = HttpLoggingInterceptor.Level.BODY
                 },

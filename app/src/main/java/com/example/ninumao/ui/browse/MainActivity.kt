@@ -14,12 +14,15 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.example.ninumao.NinumaoApp
 import com.example.ninumao.R
 import com.example.ninumao.ui.settings.SettingsActivity
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 // MainActivity 承载视频列表或引导页，并管理全局加载覆盖层。
 class MainActivity : FragmentActivity() {
 
     private var loadingOverlay: View? = null
+    private var decideScreenJob: Job? = null
+    private var showingBrowse: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,15 +31,18 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 从设置页返回时可能刚保存了 UID，需要再判断一次
         decideStartScreen()
     }
 
     // decideStartScreen 根据 UID 是否配置决定显示引导页还是视频列表。
     private fun decideStartScreen() {
         val app = application as NinumaoApp
-        lifecycleScope.launch {
+        decideScreenJob?.cancel()
+        decideScreenJob = lifecycleScope.launch {
             val config = app.configRepository.getConfig()
             if (config.uid.isBlank()) {
+                showingBrowse = false
                 showOnboarding()
             } else {
                 showBrowse()
@@ -48,7 +54,7 @@ class MainActivity : FragmentActivity() {
     private fun showOnboarding() {
         val currentFrag = supportFragmentManager.findFragmentById(android.R.id.content)
         if (currentFrag != null) {
-            supportFragmentManager.beginTransaction().remove(currentFrag).commitAllowingStateLoss()
+            supportFragmentManager.beginTransaction().remove(currentFrag).commitNowAllowingStateLoss()
         }
         setContentView(R.layout.activity_onboard)
         loadingOverlay = null
@@ -64,12 +70,15 @@ class MainActivity : FragmentActivity() {
     // showBrowse 显示多列网格视频列表，并注入加载覆盖层。
     private fun showBrowse() {
         val current = supportFragmentManager.findFragmentById(android.R.id.content)
-        if (current is VideoGridFragment) return
+        if (current is VideoGridFragment || showingBrowse) {
+            window.decorView.post { attachLoadingOverlay() }
+            return
+        }
+        showingBrowse = true
         supportFragmentManager.beginTransaction()
-            .replace(android.R.id.content, VideoGridFragment())
-            .commitAllowingStateLoss()
-        // 等 Fragment 挂载后注入覆盖层
-        window.decorView.post { attachLoadingOverlay() }
+            .replace(android.R.id.content, VideoGridFragment(), TAG_BROWSE)
+            .commitNowAllowingStateLoss()
+        attachLoadingOverlay()
     }
 
     // attachLoadingOverlay 在根 DecorView 上叠加加载图，订阅 ViewModel 的 isLoading 状态。
@@ -121,5 +130,9 @@ class MainActivity : FragmentActivity() {
     // openSettings 打开设置页。
     fun openSettings() {
         startActivity(Intent(this, SettingsActivity::class.java))
+    }
+
+    companion object {
+        private const val TAG_BROWSE = "browse"
     }
 }

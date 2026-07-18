@@ -6,8 +6,10 @@ data class AppConfig(
     val cookie: String = "",
     val pin: String = "",
     val webPort: Int = DEFAULT_WEB_PORT,
+    val recentBloggers: List<RecentBlogger> = emptyList(),
 ) {
     companion object {
         const val DEFAULT_WEB_PORT = 8765
+        const val MAX_RECENT_UIDS = 10
     }
 }

@@ -75,7 +75,11 @@ adb install app/build/outputs/apk/release/app-release.apk
 进入设置的方式：
 
 - 首次启动：引导页点击「打开设置」
-- 已配置后：按遥控器 **Menu** / **Search** / **Info** 键
+- 已配置后：遥控器**上键**聚焦标题旁设置按钮，按 OK 进入
+- 快捷键：遥控器 **Menu** / **Search** / **Info** 键
+- 设置页支持保存最近 10 个博主（显示昵称），可一键切换
+- 调试日志默认关闭
+- 图片缓存：磁盘上限约 150MB；超过 **7 天**未更新的磁盘缓存会在启动/退后台时清理；退后台时仅清内存缓存与日志，保留近期封面加速下次打开
 
 ### 2. 配置 Cookie（可选）
 
@@ -105,7 +109,7 @@ adb install app/build/outputs/apk/release/app-release.apk
 | 上一条 / 下一条视频 | PageUp / PageDown |
 | 显示播放遮罩 | 返回键（按一次） |
 | 退出播放 | 返回键（遮罩显示后 1.5 秒内再按一次） |
-| 进入设置 | Menu / Search / Info |
+| 进入设置 | 上键到标题设置按钮 / Menu / Search / Info |
 
 播放特性：
 

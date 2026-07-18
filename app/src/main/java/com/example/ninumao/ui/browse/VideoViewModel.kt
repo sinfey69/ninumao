@@ -49,6 +49,7 @@ class VideoViewModel(
                     videos = emptyList(),
                     hasMore = true,
                     nextSinceId = null,
+                    uid = "",
                 )
             }
             nextSinceId = null
@@ -89,6 +90,12 @@ class VideoViewModel(
                 sinceId = if (reset) null else nextSinceId,
             )
             nextSinceId = page.nextSinceId
+            // 首页刷新成功后，把接口解析到的博主名写回最近列表
+            if (reset) {
+                weiboRepository.lastResolvedBloggerName?.let { name ->
+                    configRepository.updateRecentBloggerName(config.uid, name)
+                }
+            }
             _uiState.update { current ->
                 val merged = if (reset) page.videos else (current.videos + page.videos).distinctBy { it.id }
                 current.copy(
