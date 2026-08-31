@@ -1,5 +1,6 @@
 package com.example.ninumao.playback
 
+import com.example.ninumao.data.weibo.PageCursor
 import com.example.ninumao.model.VideoItem
 
 // PlaybackSession 在 Activity 间传递播放列表，避免 Intent 过大导致 TV 端丢数据。
@@ -9,20 +10,20 @@ object PlaybackSession {
     data class SessionData(
         val playlist: List<VideoItem>,
         val startIndex: Int,
-        val nextSinceId: Long?,
+        val nextCursor: PageCursor?,
         val hasMore: Boolean,
     )
 
     private var playlist: List<VideoItem> = emptyList()
     private var startIndex: Int = 0
-    private var nextSinceId: Long? = null
+    private var nextCursor: PageCursor? = null
     private var hasMore: Boolean = false
 
     // prepare 写入待播放列表、起始索引与下一页游标。
-    fun prepare(videos: List<VideoItem>, index: Int, nextSinceId: Long?, hasMore: Boolean) {
+    fun prepare(videos: List<VideoItem>, index: Int, nextCursor: PageCursor?, hasMore: Boolean) {
         playlist = videos
         startIndex = index.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
-        this.nextSinceId = nextSinceId
+        this.nextCursor = nextCursor
         this.hasMore = hasMore
     }
 
@@ -30,16 +31,16 @@ object PlaybackSession {
     fun consume(): SessionData {
         val videos = playlist
         val index = startIndex
-        val cursor = nextSinceId
+        val cursor = nextCursor
         val canLoadMore = hasMore
         playlist = emptyList()
         startIndex = 0
-        nextSinceId = null
+        nextCursor = null
         hasMore = false
         return SessionData(
             playlist = videos,
             startIndex = index,
-            nextSinceId = cursor,
+            nextCursor = cursor,
             hasMore = canLoadMore,
         )
     }

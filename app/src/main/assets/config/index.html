@@ -88,9 +88,6 @@
     <label for="uid">博主 UID</label>
     <input id="uid" type="text" inputmode="numeric" placeholder="weibo.com/u/ 后面的数字" />
 
-    <label for="cookie">Cookie（可选，播放失败时填写）</label>
-    <textarea id="cookie" placeholder="从 m.weibo.cn 登录后复制 Cookie"></textarea>
-
     <button onclick="saveConfig()">保存配置</button>
     <div id="message"></div>
 
@@ -98,7 +95,6 @@
         const params = new URLSearchParams(window.location.search);
         const pinInput = document.getElementById('pin');
         const uidInput = document.getElementById('uid');
-        const cookieInput = document.getElementById('cookie');
         const messageEl = document.getElementById('message');
 
         if (params.get('pin')) {
@@ -113,7 +109,6 @@
                 if (!res.ok) return;
                 const data = await res.json();
                 uidInput.value = data.uid || '';
-                cookieInput.value = data.cookie || '';
             } catch (e) {
                 // ignore preload errors
             }
@@ -122,7 +117,6 @@
         async function saveConfig() {
             const pin = pinInput.value.trim();
             const uid = uidInput.value.trim();
-            const cookie = cookieInput.value.trim();
             if (!pin) {
                 showMessage('请输入 PIN', false);
                 return;
@@ -139,8 +133,7 @@
                     },
                     body: JSON.stringify({
                         pin,
-                        uid,
-                        cookie
+                        uid
                     })
                 });
                 const data = await res.json();

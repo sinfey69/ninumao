@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.ninumao.util.ErrorMapper
 import com.example.ninumao.data.config.ConfigRepository
+import com.example.ninumao.data.weibo.PageCursor
 import com.example.ninumao.data.weibo.WeiboRepository
 import com.example.ninumao.model.VideoItem
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +21,7 @@ data class VideoUiState(
     val isLoadingMore: Boolean = false,
     val errorMessage: String? = null,
     val hasMore: Boolean = true,
-    val nextSinceId: Long? = null,
+    val nextCursor: PageCursor? = null,
     val uid: String = "",
 )
 
@@ -33,7 +34,7 @@ class VideoViewModel(
     private val _uiState = MutableStateFlow(VideoUiState())
     val uiState: StateFlow<VideoUiState> = _uiState.asStateFlow()
 
-    private var nextSinceId: Long? = null
+    private var nextCursor: PageCursor? = null
 
     init {
         refresh()
@@ -48,11 +49,11 @@ class VideoViewModel(
                     errorMessage = null,
                     videos = emptyList(),
                     hasMore = true,
-                    nextSinceId = null,
+                    nextCursor = null,
                     uid = "",
                 )
             }
-            nextSinceId = null
+            nextCursor = null
             loadInternal(reset = true)
         }
     }
@@ -60,7 +61,7 @@ class VideoViewModel(
     // loadMore 加载下一页视频。
     fun loadMore() {
         val state = _uiState.value
-        if (state.isLoading || state.isLoadingMore || !state.hasMore || nextSinceId == null) {
+        if (state.isLoading || state.isLoadingMore || !state.hasMore || nextCursor == null) {
             return
         }
         viewModelScope.launch {
@@ -87,9 +88,9 @@ class VideoViewModel(
 
             val page = weiboRepository.fetchVideoPage(
                 config = config,
-                sinceId = if (reset) null else nextSinceId,
+                cursor = if (reset) null else nextCursor,
             )
-            nextSinceId = page.nextSinceId
+            nextCursor = page.nextCursor
             // 首页刷新成功后，把接口解析到的博主名写回最近列表
             if (reset) {
                 weiboRepository.lastResolvedBloggerName?.let { name ->
@@ -98,13 +99,14 @@ class VideoViewModel(
             }
             _uiState.update { current ->
                 val merged = if (reset) page.videos else (current.videos + page.videos).distinctBy { it.id }
+                val added = merged.size - if (reset) 0 else current.videos.size
                 current.copy(
                     videos = merged,
                     isLoading = false,
                     isLoadingMore = false,
-                    errorMessage = if (merged.isEmpty()) "暂无视频，请检查 UID 或 Cookie" else null,
-                    hasMore = page.nextSinceId != null && page.videos.isNotEmpty(),
-                    nextSinceId = page.nextSinceId,
+                    errorMessage = if (merged.isEmpty()) "暂无视频，请检查 UID 或到设置页扫码登录" else null,
+                    hasMore = page.nextCursor != null && page.videos.isNotEmpty() && (reset || added > 0),
+                    nextCursor = page.nextCursor,
                     uid = config.uid,
                 )
             }

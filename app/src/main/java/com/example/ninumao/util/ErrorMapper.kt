@@ -19,6 +19,7 @@ object ErrorMapper {
             }
             error is ConnectException -> "网络连接失败，请确认电视已连接 WiFi 或网线。"
             error is SocketTimeoutException -> "连接微博超时，请稍后重试。"
+            message.contains("432") -> "微博拒绝了当前登录态（432）。请回设置页重新扫码登录，或先退出登录再试。"
             message.isNotBlank() -> message
             else -> "加载失败，请稍后重试"
         }

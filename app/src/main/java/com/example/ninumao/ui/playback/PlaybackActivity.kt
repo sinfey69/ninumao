@@ -26,6 +26,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.example.ninumao.NinumaoApp
+import com.example.ninumao.data.weibo.PageCursor
 import com.example.ninumao.playback.PlaybackSession
 import com.example.ninumao.R
 import com.example.ninumao.databinding.ActivityPlaybackBinding
@@ -41,7 +42,7 @@ class PlaybackActivity : AppCompatActivity() {
 
     private lateinit var playlist: List<VideoItem>
     private var currentIndex: Int = 0
-    private var nextSinceId: Long? = null
+    private var nextCursor: PageCursor? = null
     private var hasMore: Boolean = false
     private var isPrefetching: Boolean = false
     private var pendingAdvanceAfterPrefetch: Boolean = false
@@ -69,13 +70,13 @@ class PlaybackActivity : AppCompatActivity() {
         if (sessionData.playlist.isNotEmpty()) {
             playlist = sessionData.playlist
             currentIndex = sessionData.startIndex
-            nextSinceId = sessionData.nextSinceId
+            nextCursor = sessionData.nextCursor
             hasMore = sessionData.hasMore
         } else {
             playlist = readPlaylist()
             currentIndex = intent.getIntExtra(EXTRA_INDEX, 0)
                 .coerceIn(0, (playlist.size - 1).coerceAtLeast(0))
-            nextSinceId = null
+            nextCursor = null
             hasMore = false
         }
 
@@ -509,7 +510,7 @@ class PlaybackActivity : AppCompatActivity() {
         if (!hasMore || isPrefetching) return
         val remaining = playlist.size - currentIndex - 1
         if (!force && remaining > PREFETCH_TRIGGER_REMAINING) return
-        val cursor = nextSinceId ?: run {
+        val cursor = nextCursor ?: run {
             hasMore = false
             return
         }
@@ -518,16 +519,16 @@ class PlaybackActivity : AppCompatActivity() {
             try {
                 val app = application as NinumaoApp
                 val config = app.configRepository.getConfig()
-                DebugLogger.log("Playback", "预取下一页 sinceId=$cursor")
-                val page = app.weiboRepository.fetchVideoPage(config, sinceId = cursor)
+                DebugLogger.log("Playback", "预取下一页 sinceId=${cursor.sinceId} page=${cursor.page}")
+                val page = app.weiboRepository.fetchVideoPage(config, cursor = cursor)
                 val merged = (playlist + page.videos).distinctBy { it.id }
                 val added = merged.size - playlist.size
                 playlist = merged
-                nextSinceId = page.nextSinceId
-                hasMore = page.nextSinceId != null && page.videos.isNotEmpty()
+                nextCursor = page.nextCursor
+                hasMore = page.nextCursor != null && page.videos.isNotEmpty() && added > 0
                 DebugLogger.log(
                     "Playback",
-                    "预取完成 added=$added hasMore=$hasMore nextSinceId=${page.nextSinceId}",
+                    "预取完成 added=$added hasMore=$hasMore next=${page.nextCursor}",
                 )
             } catch (e: Exception) {
                 DebugLogger.log("Playback", "预取失败: ${e.message}")

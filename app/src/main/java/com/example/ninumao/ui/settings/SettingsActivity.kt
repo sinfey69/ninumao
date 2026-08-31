@@ -20,14 +20,22 @@ import com.example.ninumao.BuildConfig
 import com.example.ninumao.NinumaoApp
 import com.example.ninumao.R
 import com.example.ninumao.data.config.RecentBlogger
+import com.example.ninumao.data.weibo.QrCheckResult
+import com.example.ninumao.data.weibo.WeiboQrLoginClient
 import com.example.ninumao.util.DebugLogger
 import com.example.ninumao.util.DeviceUtils
 import com.example.ninumao.util.NetworkUtils
 import com.example.ninumao.util.QrCodeGenerator
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 // SettingsActivity 承载设置页与二维码配置入口。
 class SettingsActivity : FragmentActivity() {
+
+    private var qrLoginJob: Job? = null
+    private var qrAutoStarted: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,6 +48,11 @@ class SettingsActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         refreshDisplay()
+    }
+
+    override fun onDestroy() {
+        qrLoginJob?.cancel()
+        super.onDestroy()
     }
 
     // focusPrimaryControl 进入设置页时默认聚焦 UID 输入框，避免落到调试日志区。
@@ -55,7 +68,6 @@ class SettingsActivity : FragmentActivity() {
     // bindActions 绑定输入框与按钮事件。
     private fun bindActions() {
         val etUid = findViewById<EditText>(R.id.et_uid)
-        val etCookie = findViewById<EditText>(R.id.et_cookie)
 
         // UID 输入框按回车保存。
         etUid.setOnEditorActionListener { _, actionId, event ->
@@ -72,8 +84,12 @@ class SettingsActivity : FragmentActivity() {
             saveUid(etUid.text.toString())
         }
 
-        findViewById<View>(R.id.btn_save_cookie).setOnClickListener {
-            saveCookie(etCookie.text.toString())
+        findViewById<View>(R.id.btn_qr_login).setOnClickListener {
+            startQrLogin()
+        }
+
+        findViewById<View>(R.id.btn_logout).setOnClickListener {
+            logoutWeibo()
         }
 
         findViewById<View>(R.id.btn_refresh_pin).setOnClickListener {
@@ -171,13 +187,100 @@ class SettingsActivity : FragmentActivity() {
         }
     }
 
-    // saveCookie 保存 Cookie。
-    private fun saveCookie(raw: String) {
+    // startQrLogin 生成微博登录二维码并轮询扫码状态。
+    private fun startQrLogin() {
+        qrLoginJob?.cancel()
+        val qrImage = findViewById<ImageView>(R.id.login_qr_image) ?: return
+        val statusView = findViewById<TextView>(R.id.login_qr_status) ?: return
+        val startBtn = findViewById<Button>(R.id.btn_qr_login) ?: return
+        qrLoginJob = lifecycleScope.launch {
+            try {
+                startBtn.isEnabled = false
+                statusView.text = getString(R.string.loading)
+                val client = WeiboQrLoginClient()
+                val session = client.createSession()
+                val bitmap = client.downloadQrImage(session.imageUrl)
+                if (bitmap == null) {
+                    throw IllegalStateException("二维码图片下载失败")
+                }
+                qrImage.setImageBitmap(bitmap)
+                qrImage.visibility = View.VISIBLE
+                startBtn.text = getString(R.string.settings_qr_login_refresh)
+                startBtn.isEnabled = true
+                statusView.text = getString(R.string.settings_qr_login_waiting)
+                while (isActive) {
+                    delay(1500)
+                    when (val result = client.check(session.qrid)) {
+                        QrCheckResult.Waiting ->
+                            statusView.text = getString(R.string.settings_qr_login_waiting)
+                        QrCheckResult.Scanned ->
+                            statusView.text = getString(R.string.settings_qr_login_scanned)
+                        QrCheckResult.Expired -> {
+                            statusView.text = getString(R.string.settings_qr_login_expired)
+                            break
+                        }
+                        is QrCheckResult.Confirmed -> {
+                            val cookie = client.exchangeCookie(result.alt)
+                            persistQrCookie(cookie)
+                            renderLoginStatus(true)
+                            statusView.text = getString(R.string.settings_qr_login_success)
+                            Toast.makeText(
+                                this@SettingsActivity,
+                                R.string.settings_qr_login_success,
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            break
+                        }
+                        is QrCheckResult.Failed -> {
+                            statusView.text = getString(R.string.settings_qr_login_failed, result.message)
+                            break
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                DebugLogger.log("QrLogin", "异常: ${e.message}")
+                statusView.text = getString(
+                    R.string.settings_qr_login_failed,
+                    e.message ?: e.javaClass.simpleName,
+                )
+                startBtn.isEnabled = true
+            }
+        }
+    }
+
+    // persistQrCookie 把扫码得到的登录态写入配置。
+    private suspend fun persistQrCookie(cookie: String) {
+        val app = application as NinumaoApp
+        app.configRepository.updateCookie(cookie)
+        app.notifyConfigUpdated()
+    }
+
+    // logoutWeibo 清除扫码登录态。
+    private fun logoutWeibo() {
         val app = application as NinumaoApp
         lifecycleScope.launch {
-            app.configRepository.updateCookie(raw.trim())
+            app.configRepository.updateCookie("")
             app.notifyConfigUpdated()
-            Toast.makeText(this@SettingsActivity, R.string.settings_saved, Toast.LENGTH_SHORT).show()
+            renderLoginStatus(false)
+            qrAutoStarted = false
+            Toast.makeText(this@SettingsActivity, R.string.settings_logout_done, Toast.LENGTH_SHORT).show()
+            startQrLogin()
+        }
+    }
+
+    // renderLoginStatus 刷新登录状态：已登录时收起登录码，未登录时露出扫码区。
+    private fun renderLoginStatus(loggedIn: Boolean) {
+        findViewById<TextView>(R.id.login_status_text)?.text = getString(
+            if (loggedIn) R.string.settings_login_on else R.string.settings_login_off,
+        )
+        findViewById<View>(R.id.btn_logout)?.visibility =
+            if (loggedIn) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btn_qr_login)?.visibility =
+            if (loggedIn) View.GONE else View.VISIBLE
+        if (loggedIn) {
+            qrLoginJob?.cancel()
+            findViewById<ImageView>(R.id.login_qr_image)?.visibility = View.GONE
+            findViewById<TextView>(R.id.login_qr_status)?.text = ""
         }
     }
 
@@ -193,10 +296,11 @@ class SettingsActivity : FragmentActivity() {
                 etUid.setText(config.uid)
             }
 
-            // 填入当前 Cookie 到输入框
-            val etCookie = findViewById<EditText>(R.id.et_cookie) ?: return@launch
-            if (etCookie.text.isNullOrBlank()) {
-                etCookie.setText(config.cookie)
+            val loggedIn = config.cookie.isNotBlank()
+            renderLoginStatus(loggedIn)
+            if (!loggedIn && !qrAutoStarted) {
+                qrAutoStarted = true
+                startQrLogin()
             }
 
             val currentName = config.recentBloggers.firstOrNull { it.uid == config.uid }?.displayName

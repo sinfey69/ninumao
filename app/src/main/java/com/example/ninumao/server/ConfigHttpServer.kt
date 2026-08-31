@@ -59,7 +59,6 @@ class ConfigHttpServer(
         }
         val body = JSONObject()
             .put("uid", config.uid)
-            .put("cookie", config.cookie)
             .toString()
         return newFixedLengthResponse(Response.Status.OK, "application/json", body)
     }
@@ -73,7 +72,6 @@ class ConfigHttpServer(
             val json = JSONObject(body)
             val pin = json.optString("pin")
             val uid = json.optString("uid")
-            val cookie = json.optString("cookie")
 
             val config = runBlocking { configRepository.getConfig() }
             if (pin != config.pin) {
@@ -84,7 +82,7 @@ class ConfigHttpServer(
             }
 
             runBlocking {
-                configRepository.saveConfig(config.copy(uid = uid, cookie = cookie))
+                configRepository.saveConfig(config.copy(uid = uid))
             }
             onConfigUpdated()
             jsonResponse(Response.Status.OK, true, "保存成功")

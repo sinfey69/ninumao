@@ -14,10 +14,24 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
 
+// PageCursor 微博视频列表分页游标。
+data class PageCursor(
+    val sinceId: String? = null,
+    val page: Int? = null,
+    val lastVideoId: String? = null,
+    val useWaterFall: Boolean = false,
+)
+
 // VideoPageResult 表示一页视频列表及下一页游标。
 data class VideoPageResult(
     val videos: List<VideoItem>,
-    val nextSinceId: Long?,
+    val nextCursor: PageCursor?,
+)
+
+// WeiboTabPage 微博列表容器兜底结果。
+private data class WeiboTabPage(
+    val videos: List<VideoItem>,
+    val sinceId: String?,
 )
 
 // WeiboRepository 负责解析微博视频列表与播放地址。
@@ -27,11 +41,14 @@ class WeiboRepository {
     private var cachedUid: String? = null
 
     // fetchVideoPage 拉取指定 UID 的一页视频。
-    suspend fun fetchVideoPage(config: AppConfig, sinceId: Long? = null): VideoPageResult {
+    suspend fun fetchVideoPage(config: AppConfig, cursor: PageCursor? = null): VideoPageResult {
         val uid = config.uid.trim()
         require(uid.isNotBlank()) { "UID 未配置" }
 
-        DebugLogger.log("Weibo", "开始请求 uid=$uid sinceId=$sinceId cookie=${if (config.cookie.isBlank()) "无" else "已设置(${config.cookie.length}字符)"}")
+        DebugLogger.log(
+            "Weibo",
+            "开始请求 uid=$uid sinceId=${cursor?.sinceId} page=${cursor?.page} cookie=${if (config.cookie.isBlank()) "无" else "已设置(${config.cookie.length}字符)"}",
+        )
 
         val api = createApi(config, uid)
         if (cachedUid != uid) {
@@ -40,33 +57,168 @@ class WeiboRepository {
             lastResolvedBloggerName = null
         }
 
+        if (cursor == null || cursor.useWaterFall) {
+            try {
+                return fetchWaterFallPage(api, uid, cursor)
+            } catch (e: Exception) {
+                DebugLogger.log("Weibo", "瀑布流失败: ${e.message}")
+                if (cursor?.useWaterFall == true) {
+                    throw e
+                }
+            }
+        }
+
         val containerId = cachedVideoContainerId ?: resolveVideoContainerId(api, uid).also {
             cachedVideoContainerId = it
             DebugLogger.log("Weibo", "解析到 videoContainerId=$it")
         }
 
-        DebugLogger.log("Weibo", "请求视频列表 containerId=$containerId")
-        val response = api.getContainerIndex(
-            uid = uid,
-            containerId = containerId,
-            sinceId = sinceId,
+        val response = if (cursor == null) {
+            DebugLogger.log("Weibo", "请求视频列表首页 containerId=$containerId")
+            api.getContainerIndex(type = "uid", uid = uid, containerId = containerId)
+        } else {
+            try {
+                requestNextVideoPage(api, containerId, cursor)
+            } catch (e: Exception) {
+                DebugLogger.log("Weibo", "视频下一页请求失败: ${e.message}")
+                ContainerIndexResponse(ok = 0)
+            }
+        }
+        var rawSinceId = response.data?.cardListInfo?.sinceId
+        DebugLogger.log(
+            "Weibo",
+            "响应 ok=${response.ok} cards=${response.data?.cards?.size} sinceId=$rawSinceId",
         )
-        DebugLogger.log("Weibo", "响应 ok=${response.ok} cards=${response.data?.cards?.size} sinceId=${response.data?.cardListInfo?.sinceId}")
 
-        if (response.ok != 1) {
+        if (response.ok != 1 && cursor == null) {
             val msg = "微博接口返回异常 ok=${response.ok}"
             DebugLogger.log("Weibo", "ERROR: $msg")
             throw IllegalStateException(msg)
         }
 
         val cards = response.data?.cards.orEmpty()
-        val videos = extractVideos(cards)
+        var videos = extractVideos(cards)
         DebugLogger.log("Weibo", "解析到视频 ${videos.size} 条，总 cards=${cards.size}")
         if (videos.isEmpty() && cards.isNotEmpty()) {
             DebugLogger.log("Weibo", "cards 非空但无视频，card_types=${cards.map { it.cardType }}")
         }
-        val nextSinceId = response.data?.cardListInfo?.sinceId
-        return VideoPageResult(videos = videos, nextSinceId = nextSinceId)
+        if (cursor != null && !hasPageProgress(cursor, videos)) {
+            val fallback = fetchWeiboTabVideos(api, uid, cursor)
+            if (fallback.videos.isNotEmpty()) {
+                videos = fallback.videos
+                rawSinceId = fallback.sinceId
+            }
+        }
+        return VideoPageResult(videos = videos, nextCursor = resolveNextCursor(cursor, rawSinceId, videos))
+    }
+
+    // fetchWaterFallPage 通过桌面视频瀑布流接口拉一页，用 next_cursor 翻页。
+    private suspend fun fetchWaterFallPage(
+        api: WeiboApi,
+        uid: String,
+        cursor: PageCursor?,
+    ): VideoPageResult {
+        val wfCursor = if (cursor == null) "0" else cursor.sinceId ?: "0"
+        DebugLogger.log("Weibo", "请求瀑布流 uid=$uid cursor=$wfCursor")
+        val response = api.getWaterFallContent(uid = uid, cursor = wfCursor)
+        DebugLogger.log(
+            "Weibo",
+            "瀑布流 ok=${response.ok} list=${response.data?.list?.size} next=${response.data?.nextCursor?.raw}",
+        )
+        if (response.ok != 1) {
+            throw IllegalStateException("瀑布流接口返回异常 ok=${response.ok}")
+        }
+        val list = response.data?.list.orEmpty()
+        if (cursor == null) {
+            lastResolvedBloggerName = list.firstOrNull()?.user?.screenName?.trim()
+                ?.ifBlank { list.firstOrNull()?.user?.name?.trim() }
+                ?.takeIf { !it.isNullOrBlank() }
+        }
+        val videos = list.mapNotNull { mapVideoItem(it) }.distinctBy { it.id }
+        DebugLogger.log("Weibo", "瀑布流解析到视频 ${videos.size} 条")
+        if (cursor == null && videos.isEmpty()) {
+            throw IllegalStateException("瀑布流首页无视频")
+        }
+        val next = response.data?.nextCursor?.raw?.trim()
+        val hasMore = !next.isNullOrBlank() && next != "0" && !next.startsWith("-") && videos.isNotEmpty()
+        return VideoPageResult(
+            videos = videos,
+            nextCursor = if (hasMore) {
+                PageCursor(
+                    sinceId = next,
+                    page = (cursor?.page ?: 1) + 1,
+                    lastVideoId = videos.last().id,
+                    useWaterFall = true,
+                )
+            } else {
+                null
+            },
+        )
+    }
+
+    // requestNextVideoPage 请求视频 Tab 下一页：不带 type=uid，避免被打回首页。
+    private suspend fun requestNextVideoPage(
+        api: WeiboApi,
+        containerId: String,
+        cursor: PageCursor,
+    ): ContainerIndexResponse {
+        val sinceId = cursor.sinceId ?: ((cursor.page ?: 2) - 1).toString()
+        DebugLogger.log(
+            "Weibo",
+            "请求视频下一页 containerId=$containerId sinceId=$sinceId page=${cursor.page}",
+        )
+        return api.getContainerIndex(
+            containerId = containerId,
+            sinceId = sinceId,
+            page = cursor.page,
+            pageType = "03",
+        )
+    }
+
+    // fetchWeiboTabVideos 视频 Tab 翻页失败时，改走微博列表容器并只保留视频。
+    private suspend fun fetchWeiboTabVideos(
+        api: WeiboApi,
+        uid: String,
+        cursor: PageCursor,
+    ): WeiboTabPage {
+        val weiboContainer = "107603$uid"
+        val sinceId = cursor.lastVideoId ?: cursor.sinceId?.takeIf { it.length > 8 }
+        DebugLogger.log("Weibo", "视频Tab无新数据，改走微博列表 containerId=$weiboContainer sinceId=$sinceId")
+        val response = api.getContainerIndex(
+            type = "uid",
+            uid = uid,
+            containerId = weiboContainer,
+            sinceId = sinceId,
+        )
+        val videos = extractVideos(response.data?.cards.orEmpty())
+        DebugLogger.log("Weibo", "微博列表兜底视频 ${videos.size} 条 sinceId=${response.data?.cardListInfo?.sinceId}")
+        return WeiboTabPage(
+            videos = videos,
+            sinceId = response.data?.cardListInfo?.sinceId ?: sinceId,
+        )
+    }
+
+    // hasPageProgress 判断本页是否相对上一页产生了新视频。
+    private fun hasPageProgress(cursor: PageCursor, videos: List<VideoItem>): Boolean {
+        if (videos.isEmpty()) return false
+        val lastId = cursor.lastVideoId ?: return true
+        return videos.last().id != lastId
+    }
+
+    // resolveNextCursor 从本页 since_id 或页码推算下一页游标。
+    private fun resolveNextCursor(
+        requested: PageCursor?,
+        rawSinceId: String?,
+        videos: List<VideoItem>,
+    ): PageCursor? {
+        if (videos.isEmpty()) return null
+        val currentPage = requested?.page ?: 1
+        val nextPage = currentPage + 1
+        return PageCursor(
+            sinceId = rawSinceId ?: (nextPage - 1).toString(),
+            page = nextPage,
+            lastVideoId = videos.last().id,
+        )
     }
 
     // fetchBloggerName 根据 UID 拉取博主昵称，失败时返回 null。
@@ -75,7 +227,7 @@ class WeiboRepository {
         if (trimmed.isBlank()) return null
         return try {
             val api = createApi(config, trimmed)
-            val initResponse = api.getContainerIndex(uid = trimmed)
+            val initResponse = api.getContainerIndex(type = "uid", uid = trimmed)
             val info = initResponse.data?.userInfo
             val name = info?.screenName?.trim().orEmpty().ifBlank {
                 info?.name?.trim().orEmpty()
@@ -90,7 +242,7 @@ class WeiboRepository {
     // resolveVideoContainerId 从 init 响应解析视频 Tab 的 containerid。
     private suspend fun resolveVideoContainerId(api: WeiboApi, uid: String): String {
         DebugLogger.log("Weibo", "请求 init 接口 uid=$uid")
-        val initResponse = api.getContainerIndex(uid = uid)
+        val initResponse = api.getContainerIndex(type = "uid", uid = uid)
         DebugLogger.log("Weibo", "init 响应 ok=${initResponse.ok} tabs=${initResponse.data?.tabsInfo?.tabs?.map { "${it.tabKey}(${it.containerid})" }}")
         val tabs = initResponse.data?.tabsInfo?.tabs.orEmpty()
         val videoTab = tabs.firstOrNull { tab ->
@@ -134,7 +286,7 @@ class WeiboRepository {
         val id = mblog.id ?: streamUrl
         return VideoItem(
             id = id,
-            title = TextUtils.stripHtml(mblog.text),
+            title = TextUtils.stripHtml(mblog.text ?: mblog.textRaw),
             coverUrl = normalizeUrl(pageInfo.pagePic?.url),
             streamUrl = streamUrl,
             createdAt = mblog.createdAt,
@@ -148,7 +300,10 @@ class WeiboRepository {
         val fromUrls = pageInfo.urls?.values?.firstOrNull { url ->
             url.contains(".mp4") || url.contains(".m3u8")
         }
-        return normalizeUrl(hd) ?: normalizeUrl(sd) ?: normalizeUrl(fromUrls)
+        val fromPlayback = pageInfo.mediaInfo?.playbackList
+            ?.mapNotNull { it.playInfo?.url }
+            ?.lastOrNull { url -> url.contains(".mp4") || url.contains(".m3u8") }
+        return normalizeUrl(hd) ?: normalizeUrl(sd) ?: normalizeUrl(fromUrls) ?: normalizeUrl(fromPlayback)
     }
 
     // normalizeUrl 补全协议相对地址。
@@ -184,6 +339,9 @@ class WeiboRepository {
 
         val moshi = Moshi.Builder()
             .add(KotlinJsonAdapterFactory())
+            .add(CardListInfo::class.java, CardListInfoJsonAdapter())
+            .add(PagePic::class.java, PagePicJsonAdapter())
+            .add(FlexibleCursor::class.java, FlexibleCursorJsonAdapter())
             .build()
 
         return Retrofit.Builder()
@@ -194,18 +352,50 @@ class WeiboRepository {
             .create(WeiboApi::class.java)
     }
 
-    // buildHeaderInterceptor 注入微博移动端请求头。
+    // buildHeaderInterceptor 按域名注入请求头；Cookie 只带关键字段，432 时去掉 Cookie 重试。
     private fun buildHeaderInterceptor(config: AppConfig, uid: String): Interceptor {
         return Interceptor { chain ->
-            val builder = chain.request().newBuilder()
-                .header("User-Agent", USER_AGENT)
-                .header("Referer", "https://m.weibo.cn/u/$uid")
-                .header("Accept", "application/json, text/plain, */*")
-                .header("X-Requested-With", "XMLHttpRequest")
-            if (config.cookie.isNotBlank()) {
-                builder.header("Cookie", config.cookie)
+            val request = chain.request()
+            val host = request.url.host
+            val isDesktop = host.contains("weibo.com") && !host.contains("m.weibo")
+            val referer = if (isDesktop) {
+                "https://weibo.com/u/$uid?tabtype=newVideo"
+            } else {
+                "https://m.weibo.cn/u/$uid"
             }
-            chain.proceed(builder.build())
+            val cookie = WeiboQrLoginClient.sanitizeCookie(config.cookie)
+            val builder = request.newBuilder()
+                .header("User-Agent", if (isDesktop) DESKTOP_UA else USER_AGENT)
+                .header("Referer", referer)
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                .header("X-Requested-With", "XMLHttpRequest")
+            if (!isDesktop) {
+                builder.header("MWeibo-Pwa", "1")
+            }
+            val xsrf = cookie.substringAfter("XSRF-TOKEN=", "").substringBefore(";").trim()
+            if (xsrf.isNotBlank()) {
+                builder.header("X-XSRF-TOKEN", xsrf)
+            }
+            if (cookie.isNotBlank()) {
+                builder.header("Cookie", cookie)
+            }
+            val response = chain.proceed(builder.build())
+            if (response.code == 432 && cookie.isNotBlank() && !isDesktop) {
+                response.close()
+                DebugLogger.log("Weibo", "m.weibo.cn 返回 432，去掉 Cookie 重试")
+                val retry = request.newBuilder()
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", "https://m.weibo.cn/u/$uid")
+                    .header("Accept", "application/json, text/plain, */*")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .header("MWeibo-Pwa", "1")
+                    .removeHeader("Cookie")
+                    .removeHeader("X-XSRF-TOKEN")
+                    .build()
+                return@Interceptor chain.proceed(retry)
+            }
+            response
         }
     }
 
@@ -213,5 +403,7 @@ class WeiboRepository {
         private const val BASE_URL = "https://m.weibo.cn/"
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+        private const val DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
 }

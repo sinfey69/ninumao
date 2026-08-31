@@ -139,10 +139,10 @@ class VideoGridFragment : VerticalGridSupportFragment() {
                     adapterIndex >= 0 -> adapterIndex
                     else -> videos.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
                 }
-                PlaybackSession.prepare(
+                    PlaybackSession.prepare(
                     videos = videos,
                     index = index,
-                    nextSinceId = state.nextSinceId,
+                    nextCursor = state.nextCursor,
                     hasMore = state.hasMore,
                 )
                 playbackLauncher.launch(PlaybackActivity.createIntent(requireContext(), index))

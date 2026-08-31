@@ -8,8 +8,8 @@ Android TV 应用，用于播放指定微博博主的视频列表。纯 Android 
 - ExoPlayer 全屏播放，自动连续播放下一条
 - 播放到列表末尾前自动预取下一页，无缝衔接
 - 直接调用 `m.weibo.cn` 移动端接口
-- 内置局域网配置页（NanoHTTPD），手机扫码或浏览器修改 UID / Cookie
-- TV 设置页支持遥控器直接输入 UID / Cookie
+- 内置局域网配置页（NanoHTTPD），手机扫码或浏览器修改 UID
+- TV 设置页支持遥控器输入 UID，并用微博 App 扫码登录
 
 ## 构建
 
@@ -81,19 +81,15 @@ adb install app/build/outputs/apk/release/app-release.apk
 - 调试日志默认关闭
 - 图片缓存：磁盘上限约 150MB；超过 **7 天**未更新的磁盘缓存会在启动/退后台时清理；退后台时仅清内存缓存与日志，保留近期封面加速下次打开
 
-### 2. 配置 Cookie（可选）
+### 2. 微博扫码登录
 
-若列表为空、加载失败或播放失败，通常需要登录 Cookie：
-
-1. 电脑 Chrome 打开 [m.weibo.cn](https://m.weibo.cn) 并登录
-2. F12 → Network → 刷新 → 任意请求 → Request Headers → 复制 **Cookie** 整行
-3. 粘贴到 TV 设置页的 **Cookie** 输入框 → **保存**
+加载更多视频需要登录。在设置页选中 **生成登录二维码**，用微博 App 扫码并确认即可。登录态会自动保存，可用 **退出登录** 清除。
 
 ### 3. 手机扫码远程配置
 
 1. 确保手机与电视连接 **同一 WiFi**
 2. 打开 TV 设置页，扫描右侧二维码（或手动输入显示的地址）
-3. 在手机浏览器中修改 UID / Cookie，保存后 TV 会自动刷新列表
+3. 在手机浏览器中修改 UID，保存后 TV 会自动刷新列表
 
 配置服务默认端口：`8765`（可在 `AppConfig.DEFAULT_WEB_PORT` 修改）
 
@@ -122,7 +118,7 @@ adb install app/build/outputs/apk/release/app-release.apk
 
 浏览器打开博主主页，地址栏中 `weibo.com/u/1234567890` 的数字部分即为 UID。
 
-也可在浏览器访问（需 Cookie 时带上）：
+也可在浏览器访问（需登录时带上）：
 
 ```
 https://m.weibo.cn/api/container/getIndex?type=uid&value=你的UID
@@ -166,4 +162,4 @@ app/src/main/java/com/example/ninumao/
 
 - 微博接口非官方开放 API，仅供个人学习 / 自用
 - 手机改配置需与 TV 在同一局域网
-- 部分博主视频可能需要有效 Cookie 才能加载和播放
+- 部分博主视频可能需要在设置页扫码登录后才能加载和播放

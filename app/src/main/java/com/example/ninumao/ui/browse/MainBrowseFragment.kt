@@ -69,7 +69,7 @@ class MainBrowseFragment : BrowseSupportFragment() {
                     PlaybackSession.prepare(
                         videos = videos,
                         index = index,
-                        nextSinceId = state.nextSinceId,
+                        nextCursor = state.nextCursor,
                         hasMore = state.hasMore,
                     )
                     startActivity(PlaybackActivity.createIntent(requireContext(), index))
