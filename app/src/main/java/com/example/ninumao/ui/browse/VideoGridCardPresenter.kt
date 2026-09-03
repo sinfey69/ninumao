@@ -19,6 +19,7 @@ class VideoGridCardPresenter(
     override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_video_grid_card, parent, false)
+        view.clipToOutline = true
         if (cardWidthPx > 0 && cardHeightPx > 0) {
             view.layoutParams = ViewGroup.LayoutParams(cardWidthPx, cardHeightPx)
         }

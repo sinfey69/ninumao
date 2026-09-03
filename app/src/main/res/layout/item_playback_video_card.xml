@@ -2,7 +2,8 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/card_bg"
+    android:background="@drawable/bg_card_surface"
+    android:clipToOutline="true"
     android:foreground="@drawable/bg_playback_card_focused">
 
     <ImageView
@@ -12,16 +13,27 @@
         android:contentDescription="@null"
         android:scaleType="centerCrop" />
 
+    <!-- 底部渐变遮罩 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_gravity="bottom"
+        android:background="@drawable/bg_card_gradient" />
+
     <TextView
         android:id="@+id/card_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="#99000000"
         android:ellipsize="end"
+        android:lineSpacingExtra="2dp"
         android:maxLines="2"
-        android:padding="8dp"
+        android:paddingBottom="10dp"
+        android:paddingEnd="12dp"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
         android:textColor="@android:color/white"
-        android:textSize="14sp" />
+        android:textSize="13sp"
+        android:textStyle="bold" />
 
 </FrameLayout>

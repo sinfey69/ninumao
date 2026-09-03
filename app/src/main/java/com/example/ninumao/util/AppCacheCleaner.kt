@@ -21,10 +21,8 @@ object AppCacheCleaner {
     // maxDiskCacheBytes 图片磁盘缓存上限。
     fun maxDiskCacheBytes(): Long = MAX_DISK_CACHE_BYTES
 
-    // onAppBackground 应用退到后台：清调试日志与图片内存缓存（磁盘过期清理放在下次启动）。
+    // onAppBackground 应用退到后台：清理图片内存缓存（磁盘过期清理放在下次启动）。
     fun onAppBackground(context: Context) {
-        DebugLogger.clear()
-        DebugLogger.setEnabled(false)
         clearMemoryImageCache(context)
     }
 

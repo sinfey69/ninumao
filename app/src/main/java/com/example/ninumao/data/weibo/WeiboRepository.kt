@@ -1,15 +1,12 @@
 package com.example.ninumao.data.weibo
 
-import com.example.ninumao.BuildConfig
 import com.example.ninumao.data.config.AppConfig
 import com.example.ninumao.model.VideoItem
-import com.example.ninumao.util.DebugLogger
 import com.example.ninumao.util.TextUtils
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
@@ -45,11 +42,6 @@ class WeiboRepository {
         val uid = config.uid.trim()
         require(uid.isNotBlank()) { "UID 未配置" }
 
-        DebugLogger.log(
-            "Weibo",
-            "开始请求 uid=$uid sinceId=${cursor?.sinceId} page=${cursor?.page} cookie=${if (config.cookie.isBlank()) "无" else "已设置(${config.cookie.length}字符)"}",
-        )
-
         val api = createApi(config, uid)
         if (cachedUid != uid) {
             cachedUid = uid
@@ -61,7 +53,6 @@ class WeiboRepository {
             try {
                 return fetchWaterFallPage(api, uid, cursor)
             } catch (e: Exception) {
-                DebugLogger.log("Weibo", "瀑布流失败: ${e.message}")
                 if (cursor?.useWaterFall == true) {
                     throw e
                 }
@@ -70,38 +61,26 @@ class WeiboRepository {
 
         val containerId = cachedVideoContainerId ?: resolveVideoContainerId(api, uid).also {
             cachedVideoContainerId = it
-            DebugLogger.log("Weibo", "解析到 videoContainerId=$it")
         }
 
         val response = if (cursor == null) {
-            DebugLogger.log("Weibo", "请求视频列表首页 containerId=$containerId")
             api.getContainerIndex(type = "uid", uid = uid, containerId = containerId)
         } else {
             try {
                 requestNextVideoPage(api, containerId, cursor)
             } catch (e: Exception) {
-                DebugLogger.log("Weibo", "视频下一页请求失败: ${e.message}")
                 ContainerIndexResponse(ok = 0)
             }
         }
         var rawSinceId = response.data?.cardListInfo?.sinceId
-        DebugLogger.log(
-            "Weibo",
-            "响应 ok=${response.ok} cards=${response.data?.cards?.size} sinceId=$rawSinceId",
-        )
 
         if (response.ok != 1 && cursor == null) {
             val msg = "微博接口返回异常 ok=${response.ok}"
-            DebugLogger.log("Weibo", "ERROR: $msg")
             throw IllegalStateException(msg)
         }
 
         val cards = response.data?.cards.orEmpty()
         var videos = extractVideos(cards)
-        DebugLogger.log("Weibo", "解析到视频 ${videos.size} 条，总 cards=${cards.size}")
-        if (videos.isEmpty() && cards.isNotEmpty()) {
-            DebugLogger.log("Weibo", "cards 非空但无视频，card_types=${cards.map { it.cardType }}")
-        }
         if (cursor != null && !hasPageProgress(cursor, videos)) {
             val fallback = fetchWeiboTabVideos(api, uid, cursor)
             if (fallback.videos.isNotEmpty()) {
@@ -119,12 +98,7 @@ class WeiboRepository {
         cursor: PageCursor?,
     ): VideoPageResult {
         val wfCursor = if (cursor == null) "0" else cursor.sinceId ?: "0"
-        DebugLogger.log("Weibo", "请求瀑布流 uid=$uid cursor=$wfCursor")
         val response = api.getWaterFallContent(uid = uid, cursor = wfCursor)
-        DebugLogger.log(
-            "Weibo",
-            "瀑布流 ok=${response.ok} list=${response.data?.list?.size} next=${response.data?.nextCursor?.raw}",
-        )
         if (response.ok != 1) {
             throw IllegalStateException("瀑布流接口返回异常 ok=${response.ok}")
         }
@@ -135,7 +109,6 @@ class WeiboRepository {
                 ?.takeIf { !it.isNullOrBlank() }
         }
         val videos = list.mapNotNull { mapVideoItem(it) }.distinctBy { it.id }
-        DebugLogger.log("Weibo", "瀑布流解析到视频 ${videos.size} 条")
         if (cursor == null && videos.isEmpty()) {
             throw IllegalStateException("瀑布流首页无视频")
         }
@@ -163,10 +136,6 @@ class WeiboRepository {
         cursor: PageCursor,
     ): ContainerIndexResponse {
         val sinceId = cursor.sinceId ?: ((cursor.page ?: 2) - 1).toString()
-        DebugLogger.log(
-            "Weibo",
-            "请求视频下一页 containerId=$containerId sinceId=$sinceId page=${cursor.page}",
-        )
         return api.getContainerIndex(
             containerId = containerId,
             sinceId = sinceId,
@@ -183,7 +152,6 @@ class WeiboRepository {
     ): WeiboTabPage {
         val weiboContainer = "107603$uid"
         val sinceId = cursor.lastVideoId ?: cursor.sinceId?.takeIf { it.length > 8 }
-        DebugLogger.log("Weibo", "视频Tab无新数据，改走微博列表 containerId=$weiboContainer sinceId=$sinceId")
         val response = api.getContainerIndex(
             type = "uid",
             uid = uid,
@@ -191,7 +159,6 @@ class WeiboRepository {
             sinceId = sinceId,
         )
         val videos = extractVideos(response.data?.cards.orEmpty())
-        DebugLogger.log("Weibo", "微博列表兜底视频 ${videos.size} 条 sinceId=${response.data?.cardListInfo?.sinceId}")
         return WeiboTabPage(
             videos = videos,
             sinceId = response.data?.cardListInfo?.sinceId ?: sinceId,
@@ -234,22 +201,18 @@ class WeiboRepository {
             }
             name.takeIf { it.isNotBlank() }
         } catch (e: Exception) {
-            DebugLogger.log("Weibo", "拉取博主名称失败 uid=$trimmed: ${e.message}")
             null
         }
     }
 
     // resolveVideoContainerId 从 init 响应解析视频 Tab 的 containerid。
     private suspend fun resolveVideoContainerId(api: WeiboApi, uid: String): String {
-        DebugLogger.log("Weibo", "请求 init 接口 uid=$uid")
         val initResponse = api.getContainerIndex(type = "uid", uid = uid)
-        DebugLogger.log("Weibo", "init 响应 ok=${initResponse.ok} tabs=${initResponse.data?.tabsInfo?.tabs?.map { "${it.tabKey}(${it.containerid})" }}")
         val tabs = initResponse.data?.tabsInfo?.tabs.orEmpty()
         val videoTab = tabs.firstOrNull { tab ->
             tab.tabKey == "original_video" || tab.title?.contains("视频") == true
         }
         val containerId = videoTab?.containerid ?: "107603$uid"
-        DebugLogger.log("Weibo", "选择 containerId=$containerId (tab=${videoTab?.tabKey ?: "fallback"})")
         // 顺带缓存博主名到最近列表（由调用方在拿到名称后写入配置）
         lastResolvedBloggerName = initResponse.data?.userInfo?.screenName?.trim()
             ?.ifBlank { initResponse.data?.userInfo?.name?.trim() }
@@ -324,17 +287,6 @@ class WeiboRepository {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .addInterceptor(buildHeaderInterceptor(config, uid))
-        if (BuildConfig.DEBUG) {
-            clientBuilder.addInterceptor(
-                HttpLoggingInterceptor { msg ->
-                    if (DebugLogger.isEnabled) {
-                        DebugLogger.log("HTTP", msg)
-                    }
-                }.apply {
-                    level = HttpLoggingInterceptor.Level.BODY
-                },
-            )
-        }
         val client = clientBuilder.build()
 
         val moshi = Moshi.Builder()
@@ -383,7 +335,6 @@ class WeiboRepository {
             val response = chain.proceed(builder.build())
             if (response.code == 432 && cookie.isNotBlank() && !isDesktop) {
                 response.close()
-                DebugLogger.log("Weibo", "m.weibo.cn 返回 432，去掉 Cookie 重试")
                 val retry = request.newBuilder()
                     .header("User-Agent", USER_AGENT)
                     .header("Referer", "https://m.weibo.cn/u/$uid")

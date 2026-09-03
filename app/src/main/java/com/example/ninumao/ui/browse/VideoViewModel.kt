@@ -111,10 +111,6 @@ class VideoViewModel(
                 )
             }
         } catch (e: Exception) {
-            com.example.ninumao.util.DebugLogger.log("ViewModel", "异常: ${e.javaClass.simpleName} - ${e.message}")
-            e.cause?.let { cause ->
-                com.example.ninumao.util.DebugLogger.log("ViewModel", "原因: ${cause.javaClass.simpleName} - ${cause.message}")
-            }
             val userMessage = ErrorMapper.toUserMessage(e)
             _uiState.update {
                 it.copy(

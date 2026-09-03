@@ -2,7 +2,6 @@ package com.example.ninumao.data.weibo
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import com.example.ninumao.util.DebugLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
@@ -96,7 +95,6 @@ class WeiboQrLoginClient {
         if (qrid.isBlank() || image.isBlank()) {
             throw IllegalStateException("二维码接口未返回 qrid")
         }
-        DebugLogger.log("QrLogin", "已获取 qrid")
         QrLoginSession(qrid = qrid, imageUrl = normalizeUrl(image))
     }
 
@@ -147,7 +145,6 @@ class WeiboQrLoginClient {
                 val cross = urls.optString(i)
                 if (cross.isNotBlank()) {
                     runCatching { getText(cross) }
-                        .onFailure { DebugLogger.log("QrLogin", "跨域写 Cookie 失败: ${it.message}") }
                 }
             }
         }
@@ -156,7 +153,6 @@ class WeiboQrLoginClient {
         if (!cookie.contains("SUB=")) {
             throw IllegalStateException("登录成功但未拿到 SUB Cookie")
         }
-        DebugLogger.log("QrLogin", "扫码登录成功 cookie键=${cookie.split(';').map { it.substringBefore('=').trim() }}")
         cookie
     }
 

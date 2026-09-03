@@ -1,11 +1,15 @@
 package com.example.ninumao.ui.browse
 
+import android.app.Dialog
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.Button
 import android.widget.FrameLayout
+import androidx.activity.OnBackPressedCallback
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
@@ -23,9 +27,12 @@ class MainActivity : FragmentActivity() {
     private var loadingOverlay: View? = null
     private var decideScreenJob: Job? = null
     private var showingBrowse: Boolean = false
+    private var exitDialog: Dialog? = null
+    private var lastDialogShowTime: Long = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setupBackHandler()
         decideStartScreen()
     }
 
@@ -33,6 +40,12 @@ class MainActivity : FragmentActivity() {
         super.onResume()
         // 从设置页返回时可能刚保存了 UID，需要再判断一次
         decideStartScreen()
+    }
+
+    override fun onDestroy() {
+        exitDialog?.dismiss()
+        exitDialog = null
+        super.onDestroy()
     }
 
     // decideStartScreen 根据 UID 是否配置决定显示引导页还是视频列表。
@@ -112,12 +125,95 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    // setupBackHandler 注册 AndroidX 返回事件拦截，确保电视遥控器和手势返回一致。
+    private fun setupBackHandler() {
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    handleBackPress()
+                }
+            },
+        )
+    }
+
+    // handleBackPress 处理返回按键：若弹窗已显示则关闭弹窗，否则弹出退出确认。
+    private fun handleBackPress() {
+        val now = SystemClock.uptimeMillis()
+        if (exitDialog?.isShowing == true) {
+            // 避免按键抖动或快速连击误关弹窗（至少间隔 400ms）
+            if (now - lastDialogShowTime > 400) {
+                exitDialog?.dismiss()
+            }
+        } else {
+            showExitConfirmDialog()
+        }
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && isOpenSettingsKey(keyCode)) {
             openSettings()
             return true
         }
+        // KEYCODE_ESCAPE 开启追踪，在 onKeyUp 触发，与系统 KEYCODE_BACK 机制保持一致，避免按压与抬起重复触发
+        if (keyCode == KeyEvent.KEYCODE_ESCAPE && event.repeatCount == 0) {
+            event.startTracking()
+            return true
+        }
         return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_ESCAPE && event.isTracking && !event.isCanceled) {
+            handleBackPress()
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    // showExitConfirmDialog 遥控器后退退出应用前弹出确认框，默认焦点在取消。
+    private fun showExitConfirmDialog() {
+        if (isFinishing || isDestroyed) return
+        if (exitDialog?.isShowing == true) return
+
+        lastDialogShowTime = SystemClock.uptimeMillis()
+        val view = layoutInflater.inflate(R.layout.dialog_exit_confirm, null)
+        val dialog = Dialog(this, R.style.Theme_Ninumao_ExitDialog).apply {
+            setContentView(view)
+            setCancelable(true)
+            setCanceledOnTouchOutside(false)
+        }
+        val cancelBtn = view.findViewById<Button>(R.id.btn_exit_cancel)
+        val confirmBtn = view.findViewById<Button>(R.id.btn_exit_confirm)
+        cancelBtn.setOnClickListener { dialog.dismiss() }
+        confirmBtn.setOnClickListener {
+            dialog.dismiss()
+            finishAffinity()
+        }
+        // 弹窗内部响应返回键关闭：只在 ACTION_UP 触发，且避免刚弹出瞬间的残余抬起事件误关
+        dialog.setOnKeyListener { _, keyCode, keyEvent ->
+            if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                if (keyEvent.action == KeyEvent.ACTION_UP) {
+                    if (SystemClock.uptimeMillis() - lastDialogShowTime > 400) {
+                        dialog.dismiss()
+                    }
+                    true
+                } else {
+                    keyEvent.action == KeyEvent.ACTION_DOWN
+                }
+            } else {
+                false
+            }
+        }
+        // 确保布局完成、Window 获得焦点后聚焦在取消按钮
+        dialog.setOnShowListener {
+            cancelBtn.post {
+                cancelBtn.requestFocus()
+            }
+        }
+        dialog.setOnDismissListener { exitDialog = null }
+        exitDialog = dialog
+        dialog.show()
     }
 
     // isOpenSettingsKey 判断是否为打开设置的按键。

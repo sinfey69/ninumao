@@ -31,7 +31,6 @@ import com.example.ninumao.playback.PlaybackSession
 import com.example.ninumao.R
 import com.example.ninumao.databinding.ActivityPlaybackBinding
 import com.example.ninumao.model.VideoItem
-import com.example.ninumao.util.DebugLogger
 import kotlinx.coroutines.launch
 
 // PlaybackActivity 使用 ExoPlayer 全屏播放微博视频，支持连续播放与两步返回确认退出。
@@ -519,19 +518,14 @@ class PlaybackActivity : AppCompatActivity() {
             try {
                 val app = application as NinumaoApp
                 val config = app.configRepository.getConfig()
-                DebugLogger.log("Playback", "预取下一页 sinceId=${cursor.sinceId} page=${cursor.page}")
                 val page = app.weiboRepository.fetchVideoPage(config, cursor = cursor)
                 val merged = (playlist + page.videos).distinctBy { it.id }
                 val added = merged.size - playlist.size
                 playlist = merged
                 nextCursor = page.nextCursor
                 hasMore = page.nextCursor != null && page.videos.isNotEmpty() && added > 0
-                DebugLogger.log(
-                    "Playback",
-                    "预取完成 added=$added hasMore=$hasMore next=${page.nextCursor}",
-                )
             } catch (e: Exception) {
-                DebugLogger.log("Playback", "预取失败: ${e.message}")
+                // Ignore prefetch errors
             } finally {
                 isPrefetching = false
                 if (isPlaylistOverlayVisible) {

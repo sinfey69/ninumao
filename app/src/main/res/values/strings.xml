@@ -31,12 +31,6 @@
     <string name="settings_edit_uid">修改 UID</string>
     <string name="settings_refresh_pin">重新生成 PIN</string>
     <string name="settings_saved">配置已保存</string>
-    <string name="settings_debug_log">调试日志</string>
-    <string name="settings_debug_log_enable">开启日志</string>
-    <string name="settings_debug_log_disable">关闭日志</string>
-    <string name="settings_debug_log_clear">清空</string>
-    <string name="settings_debug_log_on">调试日志已开启</string>
-    <string name="settings_debug_log_off">调试日志已关闭</string>
     <string name="video_row_title">视频列表</string>
     <string name="loading">加载中…</string>
     <string name="load_more">加载更多</string>
@@ -53,4 +47,8 @@
     <string name="settings_card_action">按 OK 进入</string>
     <string name="browse_search_hint">选中「打开设置」后按 OK；或按键盘 M / Ctrl+M</string>
     <string name="config_url_format">配置地址：%1$s</string>
+    <string name="exit_confirm_title">退出应用</string>
+    <string name="exit_confirm_message">确定要退出妮努猫吗？</string>
+    <string name="exit_confirm_cancel">取消</string>
+    <string name="exit_confirm_ok">退出</string>
 </resources>

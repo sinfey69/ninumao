@@ -15,6 +15,7 @@ class VideoCardPresenter : Presenter() {
     override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_video_card, parent, false)
+        view.clipToOutline = true
         val resources = parent.context.resources
         val width = resources.getDimensionPixelSize(R.dimen.video_card_width)
         val height = resources.getDimensionPixelSize(R.dimen.video_card_height)

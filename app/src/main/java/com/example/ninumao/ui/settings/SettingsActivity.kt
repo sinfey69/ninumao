@@ -22,7 +22,6 @@ import com.example.ninumao.R
 import com.example.ninumao.data.config.RecentBlogger
 import com.example.ninumao.data.weibo.QrCheckResult
 import com.example.ninumao.data.weibo.WeiboQrLoginClient
-import com.example.ninumao.util.DebugLogger
 import com.example.ninumao.util.DeviceUtils
 import com.example.ninumao.util.NetworkUtils
 import com.example.ninumao.util.QrCodeGenerator
@@ -96,59 +95,6 @@ class SettingsActivity : FragmentActivity() {
             refreshPin()
         }
 
-        if (BuildConfig.DEBUG) {
-            findViewById<View>(R.id.debug_log_section)?.visibility = View.VISIBLE
-            findViewById<View>(R.id.btn_toggle_debug_log)?.setOnClickListener {
-                toggleDebugLog()
-            }
-            findViewById<View>(R.id.btn_clear_log)?.setOnClickListener {
-                DebugLogger.clear()
-            }
-            updateDebugLogUi()
-            observeLog()
-        } else {
-            findViewById<View>(R.id.debug_log_section)?.visibility = View.GONE
-        }
-    }
-
-    // toggleDebugLog 切换调试日志采集开关。
-    private fun toggleDebugLog() {
-        val enabled = !DebugLogger.collectionEnabled
-        DebugLogger.setEnabled(enabled)
-        updateDebugLogUi()
-        Toast.makeText(
-            this,
-            if (enabled) R.string.settings_debug_log_on else R.string.settings_debug_log_off,
-            Toast.LENGTH_SHORT,
-        ).show()
-    }
-
-    // updateDebugLogUi 按开关状态刷新日志区控件。
-    private fun updateDebugLogUi() {
-        val enabled = DebugLogger.collectionEnabled
-        findViewById<Button>(R.id.btn_toggle_debug_log)?.text = getString(
-            if (enabled) R.string.settings_debug_log_disable else R.string.settings_debug_log_enable,
-        )
-        findViewById<View>(R.id.btn_clear_log)?.visibility =
-            if (enabled) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.log_scroll)?.visibility =
-            if (enabled) View.VISIBLE else View.GONE
-    }
-
-    // observeLog 订阅调试日志并滚动到底部，但不抢焦点。
-    private fun observeLog() {
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                DebugLogger.logFlow.collect { log ->
-                    if (!DebugLogger.collectionEnabled) return@collect
-                    val logText = findViewById<TextView>(R.id.log_text) ?: return@collect
-                    val logScroll = findViewById<ScrollView>(R.id.log_scroll) ?: return@collect
-                    logText.text = log.ifBlank { "（暂无日志，刷新首页列表即可生成）" }
-                    // 仅滚动日志区域，不改变当前焦点控件
-                    logScroll.post { logScroll.fullScroll(ScrollView.FOCUS_DOWN) }
-                }
-            }
-        }
     }
 
     // saveUid 校验并保存 UID，同时拉取博主名称写入最近列表。
@@ -238,7 +184,6 @@ class SettingsActivity : FragmentActivity() {
                     }
                 }
             } catch (e: Exception) {
-                DebugLogger.log("QrLogin", "异常: ${e.message}")
                 statusView.text = getString(
                     R.string.settings_qr_login_failed,
                     e.message ?: e.javaClass.simpleName,
@@ -368,13 +313,14 @@ class SettingsActivity : FragmentActivity() {
             val subtitle = getString(R.string.settings_recent_uid_subtitle, blogger.uid)
             val button = Button(this).apply {
                 isFocusable = true
+                isFocusableInTouchMode = true
                 isAllCaps = false
-                text = "$title\n$subtitle"
+                text = if (blogger.uid == currentUid) "● $title · $subtitle" else "$title · $subtitle"
+                textSize = 13.5f
+                setPadding((16 * density).toInt(), (10 * density).toInt(), (16 * density).toInt(), (10 * density).toInt())
                 setTextColor(ContextCompat.getColor(this@SettingsActivity, android.R.color.white))
-                backgroundTintList = ContextCompat.getColorStateList(
-                    this@SettingsActivity,
-                    if (blogger.uid == currentUid) R.color.accent else R.color.primary,
-                )
+                background = ContextCompat.getDrawable(this@SettingsActivity, R.drawable.bg_recent_chip)
+                backgroundTintList = null
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,

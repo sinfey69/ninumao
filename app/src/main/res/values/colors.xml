@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#1A237E</color>
-    <color name="primary_dark">#0D1642</color>
-    <color name="accent">#E53935</color>
-    <color name="card_bg">#263238</color>
-    <color name="text_secondary">#B0BEC5</color>
-    <color name="browse_bg">#121212</color>
+    <color name="primary">#2563EB</color>
+    <color name="primary_dark">#1D4ED8</color>
+    <color name="accent">#FF5252</color>
+    <color name="accent_pressed">#E04040</color>
+    <color name="card_bg">#161924</color>
+    <color name="card_surface">#1A1D2A</color>
+    <color name="surface_border">#2A3144</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="text_tertiary">#64748B</color>
+    <color name="browse_bg">#0D0F17</color>
+    <color name="focus_ring">#FFFFFF</color>
+    <color name="success_color">#10B981</color>
+    <color name="warning_color">#F59E0B</color>
     <color name="ic_launcher_background">#1A1208</color>
 </resources>
